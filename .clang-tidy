@@ -1,0 +1,14 @@
+---
+Checks: >
+  clang-analyzer-*,
+  readability-redundant-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-default-member-init,
+  performance-unnecessary-copy-initialization,
+  performance-move-const-arg,
+  -clang-analyzer-cplusplus.NewDelete,
+  -clang-analyzer-cplusplus.NewDeleteLeaks
+WarningsAsErrors: ''
+HeaderFilterRegex: 'blocks/.*'
+FormatStyle: 'file'

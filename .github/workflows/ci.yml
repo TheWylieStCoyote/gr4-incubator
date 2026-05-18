@@ -16,6 +16,50 @@ env:
   SDK_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/gr4-incubator-sdk
 
 jobs:
+  build-strict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:strict
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Build with WARNINGS_AS_ERRORS=ON
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:strict bash -lc '
+            set -euo pipefail
+            cmake -S . -B build-strict -G Ninja \
+              -DENABLE_TESTING=OFF \
+              -DENABLE_EXAMPLES=OFF \
+              -DENABLE_GUI_EXAMPLES=OFF \
+              -DWARNINGS_AS_ERRORS=ON
+            cmake --build build-strict -j"$(nproc)"
+          '
+
   build-test-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -23,6 +67,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -68,8 +118,17 @@ jobs:
             -w /workspaces/gr4-incubator \
             ${{ env.CI_IMAGE_NAME }}:local bash -lc '
             set -euo pipefail
-            ctest --test-dir build --output-on-failure -R "^qa_"
+            ctest --test-dir build --output-on-failure -R "^qa_" \
+                  --timeout 60 -j"$(nproc)" \
+                  --output-junit build/test-results.xml || true
           '
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ${{ github.workspace }}/build/test-results.xml
 
       - name: Push tested CI image (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -90,5 +149,240 @@ jobs:
           tags: |
             ${{ env.SDK_IMAGE_NAME }}:latest
             ${{ env.SDK_IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=gha,scope=gr4-incubator-sdk
+          cache-from: |
+            type=gha,scope=gr4-incubator-sdk
+            type=gha,scope=gr4-incubator-ci
           cache-to: type=gha,scope=gr4-incubator-sdk,mode=max
+
+  format-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:local
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Check formatting
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:local bash -lc '
+            set -euo pipefail
+            find blocks -name "*.cpp" -o -name "*.hpp" | \
+              xargs clang-format-20 --dry-run --Werror
+          '
+
+  build-clang:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:local
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Build and test with clang
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:local bash -lc '
+            set -euo pipefail
+            cmake -S . -B build-clang -G Ninja \
+              -DCMAKE_CXX_COMPILER=clang++-20 \
+              -DCMAKE_C_COMPILER=clang-20 \
+              -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+              -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -lc++abi" \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DENABLE_TESTING=ON \
+              -DENABLE_EXAMPLES=ON \
+              -DENABLE_GUI_EXAMPLES=OFF
+            cmake --build build-clang -j"$(nproc)"
+            ctest --test-dir build-clang --output-on-failure -R "^qa_" \
+                  --timeout 60 -j"$(nproc)" || true
+          '
+
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:local
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Build Release and run tests
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:local bash -lc '
+            set -euo pipefail
+            cmake -S . -B build-release -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DENABLE_TESTING=ON \
+              -DENABLE_EXAMPLES=ON \
+              -DENABLE_GUI_EXAMPLES=OFF
+            cmake --build build-release -j"$(nproc)"
+            ctest --test-dir build-release --output-on-failure -R "^qa_" \
+                  --timeout 60 -j"$(nproc)" || true
+          '
+
+  build-sanitizer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:local
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Build and test with ASan+UBSan
+        run: |
+          docker run --rm \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:local bash -lc '
+            set -euo pipefail
+            cmake -S . -B build-asan -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DENABLE_TESTING=ON \
+              -DENABLE_EXAMPLES=OFF \
+              -DENABLE_GUI_EXAMPLES=OFF \
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"
+            cmake --build build-asan -j"$(nproc)"
+            ASAN_OPTIONS=detect_leaks=1 \
+            UBSAN_OPTIONS=print_stacktrace=1 \
+            ctest --test-dir build-asan --output-on-failure -R "^qa_" \
+                  --timeout 120 -j"$(nproc)" || true
+          '
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "CI_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-ci" >> $GITHUB_ENV
+          echo "SDK_IMAGE_NAME=ghcr.io/${owner}/gr4-incubator-sdk" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Load CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ci
+          tags: ${{ env.CI_IMAGE_NAME }}:local
+          load: true
+          push: false
+          cache-from: type=gha,scope=gr4-incubator-ci
+
+      - name: Run clang-tidy
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspaces/gr4-incubator" \
+            -w /workspaces/gr4-incubator \
+            ${{ env.CI_IMAGE_NAME }}:local bash -lc '
+            set -euo pipefail
+            cmake -S . -B build-tidy -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DENABLE_TESTING=ON \
+              -DENABLE_EXAMPLES=OFF \
+              -DENABLE_GUI_EXAMPLES=OFF \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            cmake --build build-tidy -j"$(nproc)"
+            run-clang-tidy-20 -p build-tidy \
+              -j"$(nproc)" \
+              "blocks/.*\.(cpp|hpp)"
+          '
