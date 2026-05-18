@@ -56,6 +56,8 @@ RUN dpkg-reconfigure --frontend=noninteractive locales \
 FROM base AS gnuradio4-builder
 
 ARG GNURADIO4_REPO=https://github.com/gnuradio/gnuradio4.git
+# Pin to a specific commit for reproducible builds.
+# To update: set GNURADIO4_COMMIT to the desired commit hash.
 ARG GNURADIO4_COMMIT=68f96c887fec15eb2a211b491a6a229151d6f997
 
 WORKDIR /opt
@@ -123,4 +125,6 @@ WORKDIR /workspaces
 
 
 FROM ci AS dev
-WORKDIR /code
+# Development image: cmake configure runs automatically via devcontainer postCreateCommand.
+# The source tree is bind-mounted at /workspaces/gr4-incubator by the devcontainer.
+WORKDIR /workspaces/gr4-incubator

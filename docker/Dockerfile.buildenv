@@ -12,16 +12,13 @@ RUN apt-get update -q  && apt-get install --no-install-recommends -qy wget gpg c
 
 
 RUN locale-gen en_US.UTF-8 && echo 'LANG="en_US.UTF-8"'>/etc/default/locale \
-    && useradd -m -g users user \
-    && echo user ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/user && chmod 0440 /etc/sudoers.d/user 
+    && useradd -m -g users ubuntu \
+    && echo ubuntu ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/ubuntu && chmod 0440 /etc/sudoers.d/ubuntu
 
 RUN dpkg-reconfigure --frontend=noninteractive locales && update-locale LANG=en_US.UTF-8 \
     && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-15 110 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 110 --slave /usr/bin/g++ g++ /usr/bin/g++-15 --slave /usr/bin/gcov gcov /usr/bin/gcov-15
 
-
-
-RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/ubuntu
 USER ubuntu
 WORKDIR /code
 ENTRYPOINT ["/bin/bash", "-l", "-c"]

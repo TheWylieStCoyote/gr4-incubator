@@ -1,5 +1,7 @@
 # gr4-incubator
 
+[![CI](https://github.com/TheWylieStCoyote/gr4-incubator/actions/workflows/ci.yml/badge.svg)](https://github.com/TheWylieStCoyote/gr4-incubator/actions/workflows/ci.yml)
+
 The gr4-incubator repo is designed to be a staging area for GR4 block development prior to 
 upstreaming blocks to the main gnuradio4 repo.  It is intended to collect and triage the "kitchen sink"
 of useful blocks, schedulers, utilities, but have a lower bar for accepting contributions
